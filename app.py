@@ -15,6 +15,7 @@ class App():
         self.app.setEntryMaxLength("url_value", 64)
         self.app.setEntryDefault("url_value", "https://www.youtube.com/...")
         self.app.addButtons(["Download", "Cancel"], self.press, 2, 0, 2)
+        self.dl = self.create_downloader()
 
     def run(self):
         # start the GUI and create the Downloader instance
@@ -22,9 +23,10 @@ class App():
         self.create_downloader()
 
     def create_downloader(self):
-        self.dl = Downloader()
+        dl = Downloader()
         self.app.addStatusbar(fields=1)
-        self.app.setStatusbar(self.dl.get_status(), 0)
+        self.app.setStatusbar(dl.get_status(), 0)
+        return dl
 
     def press(self, btnName):
         if btnName == "Cancel":
