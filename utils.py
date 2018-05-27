@@ -5,12 +5,14 @@ def validate_url(url):
     if not url:
         raise ValueError
 
+
 def validate_playlist(url):
     if not url:
         raise ValueError
 
+
 def get_download_path():
-    """Returns the default downloads path for linux or windows"""
+    """Returns the default user's downloads path for linux, macOS or windows"""
     if os.name == 'nt':
         import winreg
         sub_key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
@@ -20,3 +22,8 @@ def get_download_path():
         return location
     else:
         return os.path.join(os.path.expanduser('~'), 'downloads')
+
+
+def create_dir(path_dir):
+    if not os.path.exists(path_dir):
+        os.makedirs(path_dir)
