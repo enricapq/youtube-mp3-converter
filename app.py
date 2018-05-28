@@ -1,5 +1,5 @@
 import logging as log
-from queue import Queue, Full
+from queue import Full # Queue,
 
 from appJar import gui
 
@@ -45,8 +45,10 @@ class App():
         log.info("app stopped")
         self.app.stop()
         #TODO stop all downloads, kill threads
+        # self.dl.stop_downloads(self)
 
     def create_downloader(self):
+        # Instantiate class that takes care of downloading videos
         dl = Downloader(self.app.save_dir)
         self.app.addStatusbar(fields=1)
         self.app.setStatusbar(dl.get_status(), 0)
@@ -65,6 +67,7 @@ class App():
             self.app.setValidationEntry("url_value", state="valid")
             self.app.queueFunction(self.app.setStatusbar, self.dl.get_status(), 0)
             # Download completed
+         #   import pdb; pdb.set_trace()
             self.app.threadCallback(self.download_url, self.download_completed, url)
         except ValueError:
             self.app.queueFunction(self.app.setValidationEntry, "url_value", state="invalid")
@@ -100,6 +103,7 @@ class App():
         #     #TODO block Add button
         #     import time;
         #     time.sleep(30)
+
 
 
 if __name__ == "__main__":
