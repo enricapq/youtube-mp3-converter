@@ -4,108 +4,97 @@ import os
 import threading
 
 from queue import Queue, Empty, Full
+from retry import retry
 
 import youtube_dl
 
 from utils import validate_url
 
-#FIXME Filter log messages
+#TODO Filter log messages
 logger = log.getLogger()
-log.raiseExceptions = False
-# Prevents debug-level messages from download
-log.getLogger("youtube_dl").setLevel("INFO")
 
-MAX_URLS =  10
+# Maximum number of download at the same time
+MAX_URLS =  1
+# Number of Threads
 POOL_SIZE = 5
-STATUS = {0: "Waiting an URL to download",
-          1: "Download in progress",
-          2: "Download completed",
-          3: "Reached maximum number of files to download",
-          4: "Url not valid",
-          5: "Unknown error",
-          6: "Download failed",
-          7: "All downlads completed"}
+
+# Map status of the Downloader with Status for the GUI
+# Status dictionary: the tuple associated to each key represents:
+# ("message status bar", "color msg status bar", "hex color Download button", "hex color Cancel button",
+#  "status of Download button", "status of Cancel button" )
+# TODO Create Class for sharing status, colors and msg (multilanguage) between the GUI and the Downloader
+STATUS = {0: (0, "Waiting an URL to download", "#EC576B", "#EC576B", "#EC576B", "active", "active"),
+          1: (1, "Download in progress", "#E5E338", "#000000", "#000000", "disabled", "disabled"),
+          2: (2, "Download completed",  "#EC576B", "#EC576B", "#EC576B", "active", "active"),
+          3: (3, "Reached maximum number of files to download, wait",
+              "#E5E338", "#000000", "#000000", "disabled", "disabled"),
+          4: (4, "Url not valid", "#FF3B3F", "#FF3B3F", "#FF3B3F", "active", "active"),
+          5: (5, "Unknown error", "#E5E338", "#E5E338", "#E5E338", "active", "active"),
+          6: (6, "Download failed", "#FC4A1A", "#FC4A1A", "#FC4A1A", "active", "active"),
+          7: (7, "All downlads completed", "#E5E338", "#E5E338", "#E5E338", "active", "active")}
 
 
-class Downloader():
+class OnDownload():
+    def __init__(self):
+        self.url = ''
+        self.percentageDownloaded = 0
+
+
+class AppState():
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.status = 0
+        self.progress = 0.0
+
+    def update_status(self, status):
+        self.lock.acquire()
+        try:
+            log.debug('Acquired a lock')
+            self.status = status
+        finally:
+            log.debug('Released a lock')
+            self.lock.release()
+
+    def get_status(self):
+        return STATUS[self.status]
+
+
+class DownloadManager():
 
     def __init__(self, path_dir):
         self.path_dir = path_dir
         # TODO adapt to Playlist
         self.queue_urls = Queue(MAX_URLS)
         self.queue_urls_done = Queue(MAX_URLS)
-        self.status = 0
-        # TODO calculate & show progress %
+        self.status = AppState()
+        # TODO calculate & show progress % --> keep track in AppState
         self.progress_bar = 0
-        # Instantiate class that converts video continuing check if there are new ones in the queue
-        DownloaderConsumer(self.path_dir, self.queue_urls, self.queue_urls_done).start()
 
-    # TODO not working code but implement POOL and retry like this
-    # def run(self):
-    #
-    #     def work():
-    #         t = threading.current_thread()
-    #         logger.info("Thread {} started".format(t.name))
-    #
-    #         url_done = None
-    #         while True:
-    #             try:
-    #                 current_url = self.queue_urls.get(block=True, timeout=1)
-    #                 log.info(f"Current url {current_url} to download")
-    #             except Empty:
-    #                 continue
-    #
-    #             try:
-    #                 # download here
-    #                 log.info(f"Downloading current_url {current_url}...")
-    #                 url_done = current_url
-    #             except Exception as e:
-    #                 #TODO implement retry
-    #                 logger.error(f"Download failed after 3 retries because of: {2}")
-    #
-    #             self.queue_urls_done.put(url_done)
-    #             self.queue_urls.task_done()
-    #
-    #         logger.info(f"Thread {t.name} finished")
-    #
-    #     logger.info("Starting {} threads to convert videos".format(POOL_SIZE))
-    #     for i in range(POOL_SIZE):
-    #         t = Thread(target=work)
-    #         t.daemon = True
-    #         t.start()
-    #
-    #     self.queue_urls.join()
-    #
-    #     logger.info("All urls have been processed")
-    #
-    #     results = []
-    #     while not self.queue_urls_done.empty():
-    #         res = self.queue_urls_done.get()
-    #         if res is not None:
-    #             results.append(res)
-    #         else:
-    #             logger.error("One of the url has not been downloaded")
+        # Producer add url to the queue
+        self.dp = DownloadProducer(self.queue_urls, self.queue_urls_done, self.status)
+        self.dp.start()
+
+        # TODO: create POOL of Consumers
+        # Instantiate class that converts video continuing check if there are new ones in the queue
+        self.dc = DownloadConsumer(self.path_dir, self.queue_urls, self.queue_urls_done,
+                                   self.status)
+        self.dc.start()
+        # TODO return list of urls completed
+        #     results = []
+        #     while not self.queue_urls_done.empty():
+        #         res = self.queue_urls_done.get()
+        #         if res is not None:
+        #             results.append(res)
+        #         else:
+        #             logger.error("One of the url has not been downloaded")
 
 
     def download_url(self, url):
-        try:
-            log.info(f"Addin to the queue_urls {url}")
-            #FIXME remove, only for testing
-            for i in range(5):
-                self.queue_urls.put_nowait(url)
-            #TODO get urls from queue done
-            # try:
-            #     self.queue_urls_done.get_nowait()
-            # except Empty:
-            #     # Update msg
-            #     self.status = 0
-        except Full as e:
-            log.info("Wait to finish previous download.")
-            self.status = 3
-            return e
+        """Add the url to the queue of videos to convert"""
+        return self.dp.download_url(url)
 
     def get_status(self):
-        return STATUS[self.status]
+        return self.status.get_status()
 
     def validate_url(self, url):
         #TODO verify if possible to use youtube_dl validator
@@ -113,11 +102,11 @@ class Downloader():
             validate_url(url)
         except ValueError as e:
             log.error(f"Url {url} not valid")
-            self.status = 4
+            self.status.update_status(4)
             raise e
         except Exception as e:
             log.error(f"Error during validation of {url}")
-            self.status = 5
+            self.status.update_status(5)
             raise e
         else:
             # stop all downloads
@@ -129,14 +118,16 @@ class Downloader():
         pass
 
 
-class DownloaderConsumer(threading.Thread, Downloader):
+# TODO make private
+class DownloadConsumer(threading.Thread):
 
-    def __init__(self, path_dir, queue_urls, queue_urls_done):
-        #FIXME using derived from BaseClass
+    def __init__(self, path_dir, queue_urls, queue_urls_done, status):
+        # FIXME using derived from BaseClass
         self.path_dir = path_dir
         # TODO adapt to Playlist
         self.queue_urls = queue_urls
         self.queue_urls_done = queue_urls_done
+        self.status = status
         threading.Thread.__init__(self)
 
     def run(self):
@@ -164,14 +155,14 @@ class DownloaderConsumer(threading.Thread, Downloader):
                    'postprocessors': [{'key': 'FFmpegExtractAudio',
                                        'preferredcodec': 'mp3',
                                        'preferredquality': '3'}],
-                   'keepvideo': True
+                   'keepvideo': False
                    #  'no_warnings': True,
                    #  'simulate': True
                    #  'logger': ProgressLogger,
                    #  'logtostderr': True
                    }
         with youtube_dl.YoutubeDL(options) as ydl:
-            self.status = 1
+            self.status.update_status(1)
             dl_thread = threading.Thread(target=ydl.download, args=([url],))
             dl_thread.start()
 
@@ -182,18 +173,33 @@ class DownloaderConsumer(threading.Thread, Downloader):
             except Exception as e:
                 log.error(f"Error converting Video {result['title']} in mp3: {e}")
 
-        # FIXME update status
-        self.status = 2
+        self.status.update_status(2)
 
-                # class ProgressLogger():
-#     def __init__(self, parent):
-#         Text.__init__(self, parent)
-#         self.parent = parent
-#
-#     def log(self, info):
-#         if '_percent_str' in info:
-#             progress = info['_percent_str']
-#         else:
-#             progress = '100.0%'
-#         filename = info['filename'].split(os.sep)[-1]
-#         self.insert('1.0', "{:s} for {:s} \n".format(progress, filename))
+
+class DownloadProducer(threading.Thread):
+    """ Producer validate url (recognise if it's a single video or a playlist)
+    and add url to the queue
+    """
+    def __init__(self, queue_urls, queue_urls_done, status):
+        self.status = status
+        # TODO adapt for Playlist
+        self.queue_urls = queue_urls
+        self.queue_urls_done = queue_urls_done
+        threading.Thread.__init__(self)
+
+    @retry(Full, tries=10, delay=5, jitter=5)
+    def download_url(self, url):
+        try:
+            log.info(f"Add to queue_urls {url}")
+            self.queue_urls.put_nowait(url)
+            #TODO get urls from queue done
+            # try:
+            #     self.queue_urls_done.get_nowait()
+            # except Empty as e:
+            #     # Update msg
+            #     self.status = 0
+        except Full as e:
+            # queue is full, wait that previous download finished
+            log.debug("Wait to finish previous download. {e}")
+            self.status.update_status(3)
+            raise Full

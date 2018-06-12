@@ -1,7 +1,10 @@
+import logging as log
 import os
+import sys
 
 
 def validate_url(url):
+    # TODO or use youtube_dl
     if not url:
         raise ValueError
 
@@ -12,8 +15,15 @@ def validate_playlist(url):
 
 
 def get_download_path():
-    """Returns the default user's downloads path for linux, macOS or windows"""
-    if os.name == 'nt':
+    """Returns the default user's downloads path for linux, macOS or windows or the current
+    dir if the OS is not one of those"""
+    if sys.platform == 'darwin':
+        # Mac OS X
+        return os.path.join(os.path.expanduser('~'), 'downloads')
+    elif sys.platform == 'linux':
+        home = os.path.expanduser("~")
+        return os.path.join(home, "Downloads")
+    elif sys.platform in ('win32', 'cygwin') and os.name == 'nt':
         import winreg
         sub_key = r'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
         downloads_guid = '{374DE290-123F-4565-9164-39C4925E467B}'
@@ -21,7 +31,9 @@ def get_download_path():
             location = winreg.QueryValueEx(key, downloads_guid)[0]
         return location
     else:
-        return os.path.join(os.path.expanduser('~'), 'downloads')
+        log.warning(f"unknown OS {sys.platform}")
+        # return current directory
+        return os.getcwd()
 
 
 def create_dir(path_dir):

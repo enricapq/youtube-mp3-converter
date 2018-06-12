@@ -1,3 +1,5 @@
-# Youtube mp3 converter
+# README #
 
-Simple converter from Youtube to mp3 
+### Requirements ###
+
+Instruction to instal ffmpeg on Linux: https://tecadmin.net/install-ffmpeg-on-linux/
